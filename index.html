@@ -399,7 +399,7 @@ function load(){
 const state=load();
 /* ================= đồng bộ giữa các thiết bị (db) ================= */
 /* cfg/main: việc, bé, chuông, thưởng (chỉ Editor ghi). days/<ngày>: tick, kế hoạch, tên việc (Contributor ghi). */
-const sync={db:null,admin:false,canWrite:true,cfgSeen:false,daysSeen:false,err:false};
+const sync={db:null,admin:false,canWrite:true,cfgSeen:false,daysSeen:false,err:false,mode:'',standalone:false};
 const known={},pending={};
 let knownCfg=null,cfgTimer=null,chain=Promise.resolve();
 function stable(v){
@@ -410,13 +410,13 @@ function stable(v){
 const clone=o=>JSON.parse(JSON.stringify(o));
 function cfgOf(o){return {v:1,pin:o.pin,kids:o.kids,tasks:o.tasks,reminders:o.reminders,reward:o.reward,money:o.money,showMoney:o.showMoney,sound:o.sound,speak:o.speak,taskRemind:o.taskRemind,paid:o.paid};}
 function syncLabel(){
-  if(!sync.db)return 'Lưu trên máy này';
+  if(!sync.db)return (sync.err&&sync.mode==='firebase')?'Không kết nối được Firebase':'Lưu trên máy này';
   if(sync.err)return 'Mất đồng bộ, đang lưu trên máy';
   if(!(sync.cfgSeen&&sync.daysSeen))return 'Đang kết nối...';
   if(!sync.canWrite)return 'Chỉ xem, chưa ghi được';
   return 'Đã đồng bộ';
 }
-function syncBad(){return !!(sync.db&&(sync.err||!sync.canWrite));}
+function syncBad(){return !!((sync.db||sync.mode==='firebase')&&(sync.err||!sync.canWrite));}
 function showSync(){const c=document.getElementById('syncChip');if(c){c.textContent=syncLabel();c.classList.toggle('bad',syncBad());}}
 function enqueue(fn){chain=chain.then(fn).catch(()=>{});return chain;}
 async function tryWrite(fn){
@@ -511,28 +511,99 @@ function onDays(snap){
   if(changed||first){save();render();}
   showSync();
 }
+/* ---- Firebase (bản chạy độc lập trên GitHub Pages, TV, điện thoại) ---- */
+const LSFB='beTuLam.fb';
+const BAKED_FB=null; /* có thể điền sẵn cấu hình Firebase vào đây khi xuất bản */
+const FB_SDK='https://www.gstatic.com/firebasejs/10.12.5/';
+function readFb(){try{return JSON.parse(localStorage.getItem(LSFB)||'null')||{};}catch(e){return {};}}
+function writeFb(o){try{if(o)localStorage.setItem(LSFB,JSON.stringify(o));else localStorage.removeItem(LSFB);}catch(e){}}
+function fbSettings(){
+  const s=readFb(),cfg=s.cfg||BAKED_FB;
+  return (cfg&&cfg.apiKey&&cfg.projectId&&s.code)?{cfg,code:s.code}:null;
+}
+function parseFbConfig(text){
+  try{const o=JSON.parse(text);if(o&&o.apiKey&&o.projectId)return o;}catch(e){}
+  const o={},re=/([A-Za-z]+)\s*:\s*["']([^"']+)["']/g;let m;
+  while((m=re.exec(text)))o[m[1]]=m[2];
+  return (o.apiKey&&o.projectId)?o:null;
+}
+function genCode(){
+  const A='abcdefghjkmnpqrstuvwxyz23456789',b=new Uint8Array(12);
+  try{crypto.getRandomValues(b);}catch(e){for(let i=0;i<12;i++)b[i]=Math.floor(Math.random()*256);}
+  return Array.from(b).map(x=>A[x%A.length]).join('');
+}
+(function hashCode(){
+  try{
+    const m=/[#&]f=([A-Za-z0-9_-]{6,40})/.exec(location.hash||'');
+    if(m){const cur=readFb();writeFb({cfg:cur.cfg,code:m[1].toLowerCase()});history.replaceState(null,'',location.pathname+location.search);}
+  }catch(e){}
+})();
+function loadScript(src){
+  return new Promise((res,rej)=>{const el=document.createElement('script');el.src=src;el.onload=res;el.onerror=()=>rej(new Error('load'));document.head.appendChild(el);});
+}
+async function fbDb(fb){
+  await loadScript(FB_SDK+'firebase-app-compat.js');
+  await loadScript(FB_SDK+'firebase-firestore-compat.js');
+  const app=(firebase.apps&&firebase.apps.length)?firebase.app():firebase.initializeApp(fb.cfg);
+  const fs=firebase.firestore(app);
+  try{await fs.enablePersistence({synchronizeTabs:true});}catch(e){}
+  const root='families/'+fb.code+'/',opt={includeMetadataChanges:true};
+  const wq=q=>({orderBy:(f,d)=>wq(q.orderBy(f,d)),limit:n=>wq(q.limit(n)),onSnapshot:(n,e)=>q.onSnapshot(opt,n,e)});
+  return {
+    doc:p=>{const r=fs.doc(root+p);return {set:o=>r.set(o),onSnapshot:(n,e)=>r.onSnapshot(opt,n,e)};},
+    collection:c=>wq(fs.collection(root+c))
+  };
+}
 async function initSync(){
+  let db=null,user=null;
+  sync.standalone=!(window.claude&&typeof window.claude.use==='function');
   try{
     const c=window.claude;
-    if(!c||typeof c.use!=='function')return;
-    const db=await c.use('db');
-    if(!db)return;
-    const user=await c.use('user');
-    sync.admin=user?!!(await user.canEdit()):false;
-    const w=user?await user.can('data.write'):null;
-    sync.canWrite=(w!==false);
-    sync.db=db;showSync();
-    const fail=()=>{sync.err=true;showSync();};
+    if(c&&typeof c.use==='function'){db=await c.use('db');if(db)user=await c.use('user');}
+  }catch(e){}
+  if(db){
+    sync.mode='claude';
+    try{
+      sync.admin=user?!!(await user.canEdit()):false;
+      const w=user?await user.can('data.write'):null;
+      sync.canWrite=(w!==false);
+    }catch(e){}
+  }else{
+    const fb=fbSettings();
+    if(!fb)return;
+    sync.mode='firebase';sync.admin=true;sync.canWrite=true;
+    try{db=await fbDb(fb);}catch(e){sync.err=true;showSync();return;}
+  }
+  sync.db=db;showSync();
+  const fail=()=>{sync.err=true;showSync();};
+  try{
     db.doc('cfg/main').onSnapshot(onCfg,fail);
     db.collection('days').orderBy('d','desc').limit(400).onSnapshot(onDays,fail);
-  }catch(e){}
+  }catch(e){fail();}
 }
+function fbLink(){const s=readFb();return s.code?location.href.split('#')[0]+'#f='+s.code:'';}
 function syncCard(){
-  const note=sync.db?(sync.admin
-    ?'Việc, bé, chuông báo và tiền thưởng sửa ở đây sẽ tự cập nhật trên mọi thiết bị đang mở trang. Dấu tick và lịch sử của bé cũng dùng chung.'
-    :'Thiết bị này chỉ có quyền Contributor: bé tick và xem lịch sử được, còn việc cần làm sửa trên thiết bị đăng nhập bằng tài khoản chủ hoặc Editor.')
-    :'Chưa bật đồng bộ vì trang chưa đăng nhập hoặc chưa được chia sẻ cho tài khoản này. Dữ liệu chỉ lưu trên máy này.';
-  return '<div class="card"><h3>Đồng bộ giữa các thiết bị</h3><p><b>'+esc(syncLabel())+'</b></p><p class="hint">'+note+'</p></div>';
+  if(!sync.standalone){
+    const note=sync.db?(sync.admin
+      ?'Việc, bé, chuông báo và tiền thưởng sửa ở đây sẽ tự cập nhật trên mọi thiết bị đang mở trang. Dấu tick và lịch sử của bé cũng dùng chung.'
+      :'Thiết bị này chỉ có quyền Contributor: bé tick và xem lịch sử được, còn việc cần làm sửa trên thiết bị đăng nhập bằng tài khoản chủ hoặc Editor.')
+      :'Chưa bật đồng bộ vì trang chưa đăng nhập hoặc chưa được chia sẻ cho tài khoản này. Dữ liệu chỉ lưu trên máy này.';
+    return '<div class="card"><h3>Đồng bộ giữa các thiết bị</h3><p><b>'+esc(syncLabel())+'</b></p><p class="hint">'+note+'</p></div>';
+  }
+  const s=readFb(),cfg=s.cfg||BAKED_FB,on=!!(cfg&&s.code);
+  let h='<div class="card"><h3>Đồng bộ qua Firebase</h3><p><b>'+esc(syncLabel())+'</b></p>';
+  if(on){
+    h+='<p class="hint">Dự án: '+esc(cfg.projectId)+'. Mọi thiết bị dùng cùng dự án và cùng mã gia đình sẽ chung việc, tick và lịch sử.</p>'+
+      '<label class="fld"><span>Mã gia đình (giữ kín, ai biết mã đều xem được dữ liệu)</span><input id="fb-code" value="'+esc(s.code)+'" maxlength="40" autocomplete="off" autocapitalize="none" spellcheck="false"></label>'+
+      '<div class="fld"><span>Link tự điền mã cho thiết bị khác</span><textarea id="fb-link" readonly rows="2" aria-label="Link kết nối">'+esc(fbLink())+'</textarea></div>'+
+      '<div class="pills"><button class="btn primary" data-pa="fbsave" data-fk="fbs">Lưu mã</button><button class="btn" data-pa="fbgen" data-fk="fbg">Tạo mã mới</button><button class="btn" data-pa="fbcopy" data-fk="fbc">Sao chép link</button><button class="btn danger" data-pa="fbclear" data-fk="fbx">'+(pp&&pp.confirm==='fbclear'?'Bấm lại để ngắt':'Ngắt kết nối')+'</button></div>';
+  }else{
+    h+='<p class="hint">Dữ liệu đang lưu riêng trên máy này. Dán cấu hình Firebase và nhập một mã gia đình để dùng chung giữa điện thoại, TV và máy tính bảng.</p>'+
+      (BAKED_FB?'':'<label class="fld"><span>Cấu hình Firebase (đoạn firebaseConfig)</span><textarea id="fb-cfg" placeholder="const firebaseConfig = { apiKey: &quot;...&quot;, projectId: &quot;...&quot; };" autocomplete="off" spellcheck="false"></textarea></label>')+
+      '<label class="fld"><span>Mã gia đình</span><input id="fb-code" value="'+esc(s.code||'')+'" maxlength="40" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="6 đến 40 ký tự: chữ thường, số, - hoặc _"></label>'+
+      '<div class="pills"><button class="btn primary" data-pa="fbsave" data-fk="fbs">Lưu và kết nối</button><button class="btn" data-pa="fbgen" data-fk="fbg">Tạo mã mới</button></div>';
+  }
+  return h+'<p class="hint" id="fb-msg" role="status"></p></div>';
 }
 function noEditHTML(){
   return '<div class="dialog"><h2>Cần quyền chỉnh sửa</h2><p>Thiết bị này chỉ được phép tick việc. Hãy đăng nhập bằng tài khoản chủ hoặc Editor để thêm, sửa việc. Thay đổi sẽ tự cập nhật sang thiết bị này.</p><button class="btn primary big" data-oa="close" data-fk="ok">Đã hiểu</button></div>';
@@ -1074,6 +1145,27 @@ function swap(id,dir){
 function pa(a,d){
   switch(a){
     case 'close':closeSheet();return;
+    case 'fbgen':{const el=$('#fb-code',sheet);if(el)el.value=genCode();return;}
+    case 'fbsave':{
+      const say2=t=>{const m=$('#fb-msg',sheet);if(m)m.textContent=t;};
+      const code=((($('#fb-code',sheet)||{}).value)||'').trim().toLowerCase();
+      const txt=((($('#fb-cfg',sheet)||{}).value)||'').trim();
+      let cfg=readFb().cfg||BAKED_FB;
+      if(txt){cfg=parseFbConfig(txt);if(!cfg){say2('Chưa đọc được cấu hình. Hãy dán cả đoạn firebaseConfig, có apiKey và projectId.');return;}}
+      if(!cfg){say2('Hãy dán cấu hình Firebase trước.');return;}
+      if(!/^[a-z0-9_-]{6,40}$/.test(code)){say2('Mã gia đình gồm 6 đến 40 ký tự: chữ thường không dấu, số, dấu - hoặc _.');return;}
+      writeFb({cfg,code});say2('Đã lưu. Đang tải lại để kết nối...');setTimeout(()=>location.reload(),700);return;
+    }
+    case 'fbcopy':{
+      const link=fbLink(),ta=$('#fb-link',sheet);
+      const fallback=()=>{if(ta){ta.focus();ta.select();}const m=$('#fb-msg',sheet);if(m)m.textContent='Hãy giữ vào ô link và chọn Sao chép.';};
+      try{navigator.clipboard.writeText(link).then(()=>{const m=$('#fb-msg',sheet);if(m)m.textContent='Đã sao chép link.';},fallback);}catch(e){fallback();}
+      return;
+    }
+    case 'fbclear':
+      if(pp.confirm==='fbclear'){writeFb(null);pp.confirm=null;const m=$('#fb-msg',sheet);if(m)m.textContent='Đã ngắt kết nối. Đang tải lại...';setTimeout(()=>location.reload(),700);}
+      else askConfirm('fbclear');
+      return;
     case 'tab':pp.tab=d.tab;pp.form=null;pp.msg='';pp.confirm=null;renderSheet();return;
     case 'addtask':pp.form={id:null,title:'',icon:'star',period:ui.period,time:'',days:ALL.slice(),kid:'all'};pp.msg='';renderSheet();return;
     case 'edittask':{const t=state.tasks.find(x=>x.id===d.id);if(!t)return;pp.form={id:t.id,title:t.title,icon:t.icon,period:t.period,time:t.time||'',days:t.days.slice(),kid:t.kid};pp.msg='';renderSheet();return;}
