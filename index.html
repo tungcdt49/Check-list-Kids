@@ -679,6 +679,9 @@ function allowCredit(k,now){
   return t;
 }
 function expSum(kidId){let n=0;Object.keys(state.exp).forEach(dk=>(state.exp[dk]||[]).forEach(p=>{if(p.kid===kidId)n+=(+p.n||0);}));return n;}
+function expRange(kidId,from,to){let n=0;for(let d=dayStart(from);d<=to;d=addDays(d,1))(state.exp[keyOf(d)]||[]).forEach(p=>{if(p.kid===kidId&&p.n<0)n+=-p.n;});return n;}
+const apKey=(wk,kid)=>'a|'+wk+'|'+kid;
+function allowUnpaid(k,now){let t=0;weeksList(52).forEach(w=>{const c=allowAt(k,w.wk);if(c>0&&!state.paid[apKey(w.wk,k.id)])t+=c;});return t;}
 const walletOf=(k,now)=>allowCredit(k,now)+expSum(k.id);
 function expList(kidId,limit){
   const out=[];
@@ -1015,7 +1018,17 @@ function walletHTML(now){
     const k=state.kids.find(z=>z.id===x.p.kid);
     return '<tr><th scope="row">'+dmy(x.dk)+'</th><td>'+esc(k?k.name:'?')+'</td><td><b>'+(x.p.n<0?'−':'+')+fmt(Math.abs(x.p.n))+'</b></td><td>'+esc(x.p.why)+'</td></tr>';
   }).join('');
-  return '<div class="card"><h3>Tiền sinh hoạt hàng tuần</h3><div class="cardrow">'+cards+'</div><p class="hint">Ví = tiền sinh hoạt các tuần đã cộng, trừ các khoản bé đã chi.</p></div>'+
+  const wrows=weeksList(8).map(w=>{
+    const cells=ks.map(k=>{
+      const c=allowAt(k,w.wk),sp=expRange(k.id,w.s,w.e);
+      if(!(c>0)&&!sp)return '<td><small class="muted">—</small></td>';
+      const pd=state.paid[apKey(w.wk,k.id)];
+      return '<td><b>'+fmt(c)+'</b> '+(c>0?'<em class="bd '+(pd?'ok':'no')+'">'+(pd?'Đã trả':'Chưa trả')+'</em>':'')+'<br><small>Đã chi '+fmt(sp)+'</small></td>';
+    }).join('');
+    return '<tr><th scope="row">'+dm(w.s)+' – '+dm(w.e)+(w.i===0?'<br><small>Tuần này</small>':'')+'</th>'+cells+'</tr>';
+  }).join('');
+  return '<div class="card"><h3>Tiền sinh hoạt hàng tuần</h3><div class="cardrow">'+cards+'</div><div class="cardrow">'+ks.map(k=>'<div class="card"><span class="muted">'+esc(k.name)+' còn chờ nhận</span><b>'+fmt(allowUnpaid(k,now))+'</b></div>').join('')+'</div><p class="hint">Ví = tiền sinh hoạt các tuần đã cộng, trừ các khoản bé đã chi. "Còn chờ nhận" là tiền các tuần bố mẹ chưa đánh dấu đã trả.</p></div>'+
+    '<div class="card"><h3>8 tuần gần nhất</h3><div class="tblw"><table><thead><tr><th>Tuần</th>'+ks.map(k=>'<th>'+esc(k.name)+'</th>').join('')+'</tr></thead><tbody>'+wrows+'</tbody></table></div></div>'+
     '<div class="card"><h3>Các khoản gần đây</h3>'+(rows?'<div class="tblw"><table><thead><tr><th>Ngày</th><th>Bé</th><th>Số tiền</th><th>Lý do</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p class="muted">Chưa có khoản chi nào.</p>')+'</div>';
 }
 function moneyHTML(now){
@@ -1191,9 +1204,16 @@ function allowTab(){
     return '<div class="trow"><div class="tinfo"><b>'+(x.p.n<0?'−':'+')+fmt(Math.abs(x.p.n))+' · '+esc(kn(x.p.kid))+'</b><small>'+dmy(x.dk)+(x.p.at?' '+esc(x.p.at):'')+' · '+esc(x.p.why)+'</small></div>'+
       '<div class="tbtns"><button class="btn sm'+(cf?' danger':'')+'" data-pa="expdel" data-id="'+x.p.id+'" data-dk="'+x.dk+'" data-fk="ed:'+x.p.id+'">'+(cf?'Bấm lại để xóa':'Xóa khoản này')+'</button></div></div>';
   }).join('');
+  const led=[];
+  weeksList(8).forEach(w=>state.kids.forEach(k=>{
+    const c=allowAt(k,w.wk);if(!(c>0))return;
+    const key=apKey(w.wk,k.id);
+    led.push('<div class="rrow"><div class="tinfo"><b>'+dm(w.s)+' – '+dm(w.e)+' · '+esc(k.name)+'</b><small>'+fmt(c)+(w.i===0?' · tuần này':'')+' · đã chi '+fmt(expRange(k.id,w.s,w.e))+'</small></div><label class="line" style="gap:.6rem"><span>Đã trả</span><input type="checkbox" class="sw" id="ap-'+w.wk+'-'+k.id+'" data-pi="paid" data-key="'+key+'"'+(state.paid[key]?' checked':'')+' aria-label="Đã trả tiền sinh hoạt"></label></div>');
+  }));
   return '<div class="card"><h3>Tiền sinh hoạt hàng tuần</h3>'+kidsRows+
     '<div class="line"><b>Cho bé xem ví trên bảng việc</b><input type="checkbox" class="sw" id="al-show" data-pi="showallow"'+(state.showAllow?' checked':'')+' aria-label="Cho bé xem ví"></div>'+
     '<p class="hint">Mỗi thứ Hai ví của bé tự cộng số tiền này. Đổi số tiền thì chỉ áp dụng từ tuần này trở đi, các tuần trước giữ nguyên. Nhập 0 để dừng cộng.</p></div>'+
+    '<div class="card"><h3>Sổ trả tiền sinh hoạt các tuần</h3>'+state.kids.filter(k=>(k.ah||[]).length).map(k=>'<p class="hint">'+esc(k.name)+' còn chờ nhận: <b>'+fmt(allowUnpaid(k,now))+'</b></p>').join('')+(led.length?led.join(''):'<p class="muted">Chưa có tuần nào có tiền sinh hoạt.</p>')+'<p class="hint">Bật "Đã trả" sau khi bố mẹ đã đưa tiền cho bé. Số liệu này hiện ở tab Ví sinh hoạt của bé.</p></div>'+
     '<div class="card"><h3>Ghi khoản chi hoặc thêm tiền</h3>'+
     '<label class="fld"><span>Bé</span><select id="exp-kid">'+state.kids.map(k=>'<option value="'+k.id+'"'+(k.id===state.active?' selected':'')+'>'+esc(k.name)+'</option>').join('')+'</select></label>'+
     '<label class="fld"><span>Loại</span><select id="exp-type"><option value="spend">Bé chi tiền</option><option value="add">Thêm tiền cho bé</option></select></label>'+
@@ -1537,7 +1557,7 @@ function pi(t,commit){
       };
       r.readAsText(f);return;
     }
-    case 'paid':if(t.checked)state.paid[t.dataset.key]=true;else delete state.paid[t.dataset.key];save();return;
+    case 'paid':if(t.checked)state.paid[t.dataset.key]=true;else delete state.paid[t.dataset.key];save();if(commit&&t.dataset.key.charAt(0)==='a')renderSheet();return;
   }
 }
 sheet.addEventListener('click',e=>{const b=e.target.closest('[data-pa]');if(b&&pp)pa(b.dataset.pa,b.dataset);});
