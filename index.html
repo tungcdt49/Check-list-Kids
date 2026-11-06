@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#2F8FE8"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Bé Tự Làm"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" type="image/png" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
 <meta name="claude:viewport-fit-sides" content="cover">
 <title>Bé Tự Làm</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -146,6 +146,7 @@ body[data-kc="p"]{--p:var(--kp);--ps:var(--kp-s);--bg:var(--kp-bg)}
 .bar{height:1.1rem;margin-top:.5rem;border-radius:99px;background:var(--surface-2);border:2px solid var(--line);overflow:hidden}
 .bar i{display:block;height:100%;width:var(--w);background:var(--p);border-radius:99px;transition:width .4s}
 .meter p{margin-top:.45rem;font-weight:700;color:var(--muted)}
+.meter .walletline b{color:var(--ink)}
 .stars{display:flex;flex-wrap:wrap;gap:.25rem;margin-top:.5rem}
 .stars svg{width:1.7rem;height:1.7rem;stroke-width:2;stroke-linejoin:round}
 .stars .on{fill:var(--i-y);stroke:var(--i-line)}
@@ -367,7 +368,7 @@ function defaults(){
       {id:'r'+uid(),time:'19:30',period:'evening',on:true,days:ALL.slice(),kid:'all',repeat:0,msg:''}
     ],
     reward:{text:'Một buổi đi chơi công viên',target:50},
-    sound:true, speak:false, taskRemind:false, done:{}, plan:{}, snap:{}, paid:{}, pen:{}, showMoney:true,
+    sound:true, speak:false, taskRemind:false, done:{}, plan:{}, snap:{}, paid:{}, pen:{}, exp:{}, schema:2, showMoney:true, showAllow:true,
     money:{rate:1000,cap:0,bonus:0}
   };
 }
@@ -388,6 +389,13 @@ function normalize(s){
   o.paid=(s.paid&&typeof s.paid==='object')?s.paid:{};
   o.money=Object.assign({},d.money,s.money||{});
   o.pen=(s.pen&&typeof s.pen==='object')?s.pen:{};
+  o.exp=(s.exp&&typeof s.exp==='object')?s.exp:{};
+  o.schema=2;
+  if(typeof o.showAllow!=='boolean')o.showAllow=true;
+  o.kids.forEach(k=>{
+    if(!Array.isArray(k.ah))k.ah=[];
+    k.ah=k.ah.filter(h=>h&&/^\d{4}-\d{2}-\d{2}$/.test(h.w)&&isFinite(+h.a)).map(h=>({w:h.w,a:Math.max(0,Math.round(+h.a))})).sort((x,y)=>x.w<y.w?-1:(x.w>y.w?1:0));
+  });
   o.kids.forEach(k=>{if(typeof k.pw!=='string')k.pw='';});
   if(typeof o.showMoney!=='boolean')o.showMoney=true;
   o.tasks.forEach(t=>{if(!Array.isArray(t.days)||!t.days.length)t.days=ALL.slice();if(!t.kid)t.kid='all';});
@@ -397,7 +405,13 @@ function normalize(s){
 function load(){
   try{
     const raw=localStorage.getItem(LS);
-    if(raw){const s=JSON.parse(raw);if(s&&Array.isArray(s.kids)&&s.kids.length&&Array.isArray(s.tasks))return normalize(s);}
+    if(raw){
+      const s=JSON.parse(raw);
+      if(s&&Array.isArray(s.kids)&&s.kids.length&&Array.isArray(s.tasks)){
+        if(!(s.schema>=2)){try{if(!localStorage.getItem(LS+'.bak-v1'))localStorage.setItem(LS+'.bak-v1',raw);}catch(e){}}
+        return normalize(s);
+      }
+    }
   }catch(e){}
   return defaults();
 }
@@ -413,7 +427,7 @@ function stable(v){
   return JSON.stringify(v);
 }
 const clone=o=>JSON.parse(JSON.stringify(o));
-function cfgOf(o){return {v:1,pin:o.pin,kids:o.kids,tasks:o.tasks,reminders:o.reminders,reward:o.reward,money:o.money,showMoney:o.showMoney,sound:o.sound,speak:o.speak,taskRemind:o.taskRemind,paid:o.paid};}
+function cfgOf(o){return {v:1,pin:o.pin,kids:o.kids,tasks:o.tasks,reminders:o.reminders,reward:o.reward,money:o.money,showMoney:o.showMoney,sound:o.sound,speak:o.speak,taskRemind:o.taskRemind,paid:o.paid,showAllow:o.showAllow};}
 function syncLabel(){
   if(!sync.db)return (sync.err&&sync.mode==='firebase')?'Không kết nối được Firebase':'Lưu trên máy này';
   if(sync.err)return 'Mất đồng bộ, đang lưu trên máy';
@@ -436,12 +450,12 @@ function dayDoc(dk){
   const done=clone(state.done[dk]||{}),plan=clone(state.plan[dk]||{}),ids={};
   Object.values(plan).concat(Object.values(done)).forEach(a=>(a||[]).forEach(i=>{ids[i]=1;}));
   const snap={};Object.keys(ids).forEach(i=>{if(state.snap[i])snap[i]=state.snap[i];});
-  return {d:dk,done,plan,snap,pen:clone(state.pen[dk]||[])};
+  return {d:dk,done,plan,snap,pen:clone(state.pen[dk]||[]),exp:clone(state.exp[dk]||[])};
 }
 function queueDay(dk){
   if(!sync.db||!sync.canWrite||!sync.daysSeen)return;
   const o=dayDoc(dk);
-  if(known[dk]===undefined&&!Object.values(o.plan).concat(Object.values(o.done)).some(a=>a&&a.length)&&!o.pen.length)return;
+  if(known[dk]===undefined&&!Object.values(o.plan).concat(Object.values(o.done)).some(a=>a&&a.length)&&!o.pen.length&&!o.exp.length)return;
   const j=stable(o);
   if(known[dk]===j)return;
   known[dk]=j;pending[dk]=(pending[dk]||0)+1;
@@ -468,7 +482,7 @@ function pushCfg(){
   });
 }
 function applyCfg(d){
-  const n=normalize(Object.assign({},clone(d),{active:state.active,done:state.done,plan:state.plan,snap:state.snap,pen:state.pen}));
+  const n=normalize(Object.assign({},clone(d),{active:state.active,done:state.done,plan:state.plan,snap:state.snap,pen:state.pen,exp:state.exp}));
   const j=stable(cfgOf(n));
   if(j===stable(cfgOf(state))){knownCfg=j;return;}
   Object.keys(state).forEach(k=>delete state[k]);Object.assign(state,n);
@@ -494,7 +508,7 @@ function onDays(snap){
     if(!doc.exists)return;
     const dk=doc.id;if(pending[dk]>0)return;
     const x=doc.data()||{};
-    const o={d:dk,done:(x.done&&typeof x.done==='object')?clone(x.done):{},plan:(x.plan&&typeof x.plan==='object')?clone(x.plan):{},snap:(x.snap&&typeof x.snap==='object')?clone(x.snap):{},pen:Array.isArray(x.pen)?clone(x.pen):[]};
+    const o={d:dk,done:(x.done&&typeof x.done==='object')?clone(x.done):{},plan:(x.plan&&typeof x.plan==='object')?clone(x.plan):{},snap:(x.snap&&typeof x.snap==='object')?clone(x.snap):{},pen:Array.isArray(x.pen)?clone(x.pen):[],exp:Array.isArray(x.exp)?clone(x.exp):[]};
     const j=stable(o);
     if(known[dk]===j)return;
     if(known[dk]===undefined&&state.done[dk]){
@@ -505,14 +519,15 @@ function onDays(snap){
       });
     }
     if(known[dk]===undefined&&state.pen[dk]){state.pen[dk].forEach(p=>{if(!o.pen.some(q=>q.id===p.id))o.pen.push(p);});}
-    state.done[dk]=o.done;state.plan[dk]=o.plan;state.pen[dk]=o.pen;Object.assign(state.snap,o.snap);
+    if(known[dk]===undefined&&state.exp[dk]){state.exp[dk].forEach(p=>{if(!o.exp.some(q=>q.id===p.id))o.exp.push(p);});}
+    state.done[dk]=o.done;state.plan[dk]=o.plan;state.pen[dk]=o.pen;state.exp[dk]=o.exp;Object.assign(state.snap,o.snap);
     known[dk]=j;changed=true;
   });
   const cache=!!(snap.metadata&&snap.metadata.fromCache);
   const first=!sync.daysSeen&&!cache;
   if(first){
     sync.daysSeen=true;
-    if(sync.canWrite)Object.keys(Object.assign({},state.done,state.pen)).forEach(dk=>{if(known[dk]===undefined)queueDay(dk);});
+    if(sync.canWrite)Object.keys(Object.assign({},state.done,state.pen,state.exp)).forEach(dk=>{if(known[dk]===undefined)queueDay(dk);});
   }
   if(changed||first){save();render();}
   showSync();
@@ -584,7 +599,7 @@ async function initSync(){
   const fail=()=>{sync.err=true;showSync();};
   try{
     db.doc('cfg/main').onSnapshot(onCfg,fail);
-    db.collection('days').orderBy('d','desc').limit(400).onSnapshot(onDays,fail);
+    db.collection('days').orderBy('d','desc').limit(1500).onSnapshot(onDays,fail);
   }catch(e){fail();}
 }
 function fbLink(){const s=readFb();return s.code?location.href.split('#')[0]+'#f='+s.code:'';}
@@ -618,9 +633,7 @@ function noEditHTML(){
 function save(){try{localStorage.setItem(LS,JSON.stringify(state));}catch(e){}schedCfg();}
 (function prune(){
   const lim=new Date();lim.setDate(lim.getDate()-400);const lk=keyOf(lim);
-  Object.keys(state.done).forEach(k=>{if(k<lk)delete state.done[k];});
   Object.keys(state.plan).forEach(k=>{if(k<lk)delete state.plan[k];});
-  Object.keys(state.pen).forEach(k=>{if(k<lk)delete state.pen[k];});
 })();
 let fired={};try{fired=JSON.parse(localStorage.getItem(LSF)||'{}')||{};}catch(e){}
 function saveFired(){try{localStorage.setItem(LSF,JSON.stringify(fired));}catch(e){}}
@@ -655,6 +668,24 @@ function weeksList(n){
   for(let i=0;i<n;i++){const s=addDays(ws,-7*i);out.push({i,s,e:addDays(s,6),wk:keyOf(s)});}
   return out;
 }
+/* ---- tiền sinh hoạt hàng tuần ---- */
+const parseKey=k=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(k);return new Date(+m[1],+m[2]-1,+m[3]);};
+function allowAt(k,wk){let a=0;(k.ah||[]).forEach(h=>{if(h.w<=wk)a=h.a;});return a;}
+function allowOn(){return state.kids.some(k=>(k.ah||[]).length>0);}
+function allowCredit(k,now){
+  const ah=k.ah||[];if(!ah.length)return 0;
+  const cur=weekStart(now);let t=0;
+  for(let s=weekStart(parseKey(ah[0].w));s<=cur;s=addDays(s,7))t+=allowAt(k,keyOf(s));
+  return t;
+}
+function expSum(kidId){let n=0;Object.keys(state.exp).forEach(dk=>(state.exp[dk]||[]).forEach(p=>{if(p.kid===kidId)n+=(+p.n||0);}));return n;}
+const walletOf=(k,now)=>allowCredit(k,now)+expSum(k.id);
+function expList(kidId,limit){
+  const out=[];
+  Object.keys(state.exp).sort().reverse().forEach(dk=>(state.exp[dk]||[]).slice().reverse().forEach(p=>{if(!kidId||p.kid===kidId)out.push({dk,p});}));
+  return limit?out.slice(0,limit):out;
+}
+const dmy=dk=>dk.slice(8)+'/'+dk.slice(5,7)+'/'+dk.slice(0,4);
 function ensurePlan(now){
   const dk=keyOf(now);
   state.tasks.forEach(t=>{state.snap[t.id]={t:t.title,i:t.icon,p:t.period};});
@@ -785,6 +816,10 @@ function render(){
   const hm=pad(now.getHours())+':'+pad(now.getMinutes());
   const rw=state.reward,rpct=Math.min(100,Math.round(wk/Math.max(1,rw.target)*100));
   const moneyLine=(state.showMoney&&moneyOn())?'<p>Tiền thưởng tuần này: <b>'+fmt(moneyFor(wk).total)+'</b> <span class="muted">(1 sao = '+fmt(state.money.rate)+')</span></p>':'';
+  const allowLine=(state.showAllow&&(kid.ah||[]).length)?(function(){
+    const w=walletOf(kid,now),ex=expList(kid.id,2);
+    return '<p class="walletline">Ví của con: <b>'+fmt(w)+'</b> <span class="muted">(mỗi tuần +'+fmt(allowAt(kid,keyOf(weekStart(now))))+')</span>'+(ex.length?'<br><small>Gần đây: '+ex.map(x=>(x.p.n<0?'đã chi ':'được thêm ')+fmt(Math.abs(x.p.n))+' · '+esc(x.p.why)).join('; ')+'</small>':'')+'</p>';
+  })():'';
   const wkPens=[];
   for(let d=weekStart(now);d<=now;d=addDays(d,1)){const k2=keyOf(d);(state.pen[k2]||[]).forEach(p=>{if(p.kid===kid.id)wkPens.push({dk:k2,p});});}
   const penLine=wkPens.length?'<p class="penline">Đã bị trừ '+wkPens.reduce((a,x)=>a+(+x.p.n||0),0)+' sao tuần này: '+wkPens.slice(-2).map(x=>esc(x.p.why)+' ('+x.dk.slice(8)+'/'+x.dk.slice(5,7)+')').join('; ')+'</p>':'';
@@ -824,7 +859,7 @@ function render(){
    '<main class="board">'+board+'</main>'+
    '<section class="meters" aria-label="Tiến độ">'+
      '<div class="meter"><h3>'+periodName(ui.period)+'<span>'+cur.d+'/'+cur.l.length+' việc</span></h3><div class="stars">'+(starRow||'<span class="muted">Chưa có việc để lấy sao</span>')+'</div><p>Cả ngày hôm nay: '+dayD+'/'+dayT+' việc</p></div>'+
-     '<div class="meter"><h3>Sao tuần này<span>'+wk+'/'+rw.target+'</span></h3><div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="'+rw.target+'" aria-valuenow="'+Math.min(wk,rw.target)+'"><i style="--w:'+rpct+'%"></i></div><p>'+(wk>=rw.target?'Đạt rồi! Phần thưởng: ':'Phần thưởng khi đủ sao: ')+esc(rw.text)+'</p>'+moneyLine+penLine+'</div>'+
+     '<div class="meter"><h3>Sao tuần này<span>'+wk+'/'+rw.target+'</span></h3><div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="'+rw.target+'" aria-valuenow="'+Math.min(wk,rw.target)+'"><i style="--w:'+rpct+'%"></i></div><p>'+(wk>=rw.target?'Đạt rồi! Phần thưởng: ':'Phần thưởng khi đủ sao: ')+esc(rw.text)+'</p>'+moneyLine+allowLine+penLine+'</div>'+
    '</section>');
   ui.pop=null;
   checkNewPen(kid);
@@ -907,8 +942,9 @@ function kidChips(kid){
 function renderReview(now,kid){
   const tabs=[['hist','Lịch sử'],['stats','Thống kê']];
   if(state.showMoney&&moneyOn())tabs.push(['money','Tiền thưởng']);
+  if(state.showAllow&&allowOn())tabs.push(['wallet','Ví sinh hoạt']);
   if(!tabs.some(t=>t[0]===ui.rtab))ui.rtab='hist';
-  const body=ui.rtab==='hist'?histHTML(now,kid):(ui.rtab==='stats'?statsHTML(now):moneyHTML(now));
+  const body=ui.rtab==='hist'?histHTML(now,kid):(ui.rtab==='stats'?statsHTML(now):(ui.rtab==='wallet'?walletHTML(now):moneyHTML(now)));
   setHTML(root,
     '<header class="top"><div class="who">'+mascot(periodAt(now),false)+'<div style="min-width:0"><h1 class="hello">Nhìn lại những ngày qua</h1><p class="sub">Xem việc đã làm, so sánh sao'+((state.showMoney&&moneyOn())?' và tiền thưởng':'')+'.</p></div></div>'+
     '<div class="tools"><button class="chip" data-act="back" data-fk="back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Về bảng việc</button></div></header>'+
@@ -971,6 +1007,16 @@ function statsHTML(now){
   return '<div class="card"><div class="pills" role="group" aria-label="Khoảng thời gian">'+modes.map(x=>'<button class="pill" data-act="smode" data-m="'+x[0]+'" data-fk="sm:'+x[0]+'" aria-pressed="'+(mode===x[0])+'">'+x[1]+'</button>').join('')+'</div>'+
     '<h3>Số sao theo '+(mode==='day'?'ngày':(mode==='week'?'tuần':'tháng'))+' · '+title+'</h3>'+(state.kids.length>1?legend:'')+chart+'<p class="hint">Mỗi việc làm xong được 1 sao. Tuần tính từ thứ Hai đến Chủ nhật.</p></div>'+
     '<div class="card"><h3>Tổng sao hiện tại</h3><div class="tblw"><table><thead><tr><th>Bé</th><th>Hôm nay</th><th>Tuần này</th><th>Tháng này</th><th>Hoàn thành tuần</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+}
+function walletHTML(now){
+  const ks=state.kids.filter(k=>(k.ah||[]).length);
+  const cards=ks.map(k=>'<div class="card"><span class="muted">Ví của '+esc(k.name)+'</span><b>'+fmt(walletOf(k,now))+'</b><small class="muted">Mỗi tuần '+fmt(allowAt(k,keyOf(weekStart(now))))+'</small></div>').join('');
+  const rows=expList(null,30).filter(x=>ks.some(k=>k.id===x.p.kid)).map(x=>{
+    const k=state.kids.find(z=>z.id===x.p.kid);
+    return '<tr><th scope="row">'+dmy(x.dk)+'</th><td>'+esc(k?k.name:'?')+'</td><td><b>'+(x.p.n<0?'−':'+')+fmt(Math.abs(x.p.n))+'</b></td><td>'+esc(x.p.why)+'</td></tr>';
+  }).join('');
+  return '<div class="card"><h3>Tiền sinh hoạt hàng tuần</h3><div class="cardrow">'+cards+'</div><p class="hint">Ví = tiền sinh hoạt các tuần đã cộng, trừ các khoản bé đã chi.</p></div>'+
+    '<div class="card"><h3>Các khoản gần đây</h3>'+(rows?'<div class="tblw"><table><thead><tr><th>Ngày</th><th>Bé</th><th>Số tiền</th><th>Lý do</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p class="muted">Chưa có khoản chi nào.</p>')+'</div>';
 }
 function moneyHTML(now){
   const m=state.money;
@@ -1090,12 +1136,13 @@ function daysText(d){
   return DAY_ORDER.filter(x=>d.includes(x)).map(x=>DAYS[x]).join(' ');
 }
 function parentHTML(){
-  const tabs=[['tasks','Việc cần làm'],['kids','Các bé'],['bell','Chuông báo'],['money','Tiền thưởng'],['pen','Trừ sao'],['more','Cài đặt']];
+  const tabs=[['tasks','Việc cần làm'],['kids','Các bé'],['bell','Chuông báo'],['money','Tiền thưởng'],['allow','Tiền sinh hoạt'],['pen','Trừ sao'],['more','Cài đặt']];
   let body='';
   if(pp.tab==='tasks')body=pp.form?taskForm():tasksTab();
   else if(pp.tab==='kids')body=kidsTab();
   else if(pp.tab==='bell')body=bellTab();
   else if(pp.tab==='money')body=moneyTab();
+  else if(pp.tab==='allow')body=allowTab();
   else if(pp.tab==='pen')body=penTab();
   else body=moreTab();
   return '<div class="sheet-in"><div class="sheet-head"><h2>Khu vực bố mẹ</h2><button class="btn primary" data-pa="close" data-fk="close">Xong</button></div>'+
@@ -1132,6 +1179,30 @@ function taskForm(){
       '<div class="pills"><button class="btn sm" data-pa="fpreset" data-preset="all" data-fk="pa">Mỗi ngày</button><button class="btn sm" data-pa="fpreset" data-preset="school" data-fk="ps">Ngày đi học (T2 đến T6)</button><button class="btn sm" data-pa="fpreset" data-preset="weekend" data-fk="pw">Cuối tuần</button></div></div>'+
     '<label class="fld"><span>Giao cho</span><select id="f-kid" data-pi="fkid"><option value="all"'+(f.kid==='all'?' selected':'')+'>Tất cả các bé</option>'+state.kids.map(k=>'<option value="'+k.id+'"'+(f.kid===k.id?' selected':'')+'>'+esc(k.name)+'</option>').join('')+'</select></label>'+
     '<div class="pills"><button class="btn primary" data-pa="fsave" data-fk="fs">Lưu việc</button><button class="btn" data-pa="fcancel" data-fk="fc">Hủy</button></div></div>';
+}
+function allowTab(){
+  const now=new Date(),today=keyOf(now),wk=keyOf(weekStart(now));
+  const QUICK=['Mua đồ ăn vặt','Mua đồ chơi','Mua sách vở','Đi chơi với bạn','Gửi tiết kiệm'];
+  const kn=id=>((state.kids.find(k=>k.id===id))||{}).name||'(bé đã xóa)';
+  const kidsRows=state.kids.map(k=>'<div class="rrow"><div class="tinfo"><b>'+esc(k.name)+'</b><small>Ví hiện có: '+fmt(walletOf(k,now))+'</small></div>'+
+    '<label class="fld"><span>Tiền mỗi tuần (đồng)</span><input type="number" id="al-'+k.id+'" data-pi="kal" data-id="'+k.id+'" min="0" step="5000" inputmode="numeric" value="'+allowAt(k,wk)+'"></label></div>').join('');
+  const rows=expList(null,30).map(x=>{
+    const cf=pp.confirm==='exp:'+x.p.id;
+    return '<div class="trow"><div class="tinfo"><b>'+(x.p.n<0?'−':'+')+fmt(Math.abs(x.p.n))+' · '+esc(kn(x.p.kid))+'</b><small>'+dmy(x.dk)+(x.p.at?' '+esc(x.p.at):'')+' · '+esc(x.p.why)+'</small></div>'+
+      '<div class="tbtns"><button class="btn sm'+(cf?' danger':'')+'" data-pa="expdel" data-id="'+x.p.id+'" data-dk="'+x.dk+'" data-fk="ed:'+x.p.id+'">'+(cf?'Bấm lại để xóa':'Xóa khoản này')+'</button></div></div>';
+  }).join('');
+  return '<div class="card"><h3>Tiền sinh hoạt hàng tuần</h3>'+kidsRows+
+    '<div class="line"><b>Cho bé xem ví trên bảng việc</b><input type="checkbox" class="sw" id="al-show" data-pi="showallow"'+(state.showAllow?' checked':'')+' aria-label="Cho bé xem ví"></div>'+
+    '<p class="hint">Mỗi thứ Hai ví của bé tự cộng số tiền này. Đổi số tiền thì chỉ áp dụng từ tuần này trở đi, các tuần trước giữ nguyên. Nhập 0 để dừng cộng.</p></div>'+
+    '<div class="card"><h3>Ghi khoản chi hoặc thêm tiền</h3>'+
+    '<label class="fld"><span>Bé</span><select id="exp-kid">'+state.kids.map(k=>'<option value="'+k.id+'"'+(k.id===state.active?' selected':'')+'>'+esc(k.name)+'</option>').join('')+'</select></label>'+
+    '<label class="fld"><span>Loại</span><select id="exp-type"><option value="spend">Bé chi tiền</option><option value="add">Thêm tiền cho bé</option></select></label>'+
+    '<label class="fld"><span>Số tiền (đồng)</span><input type="number" id="exp-amt" min="0" step="1000" inputmode="numeric" placeholder="Ví dụ: 20000"></label>'+
+    '<label class="fld"><span>Lý do (bắt buộc)</span><input id="exp-why" maxlength="60" placeholder="Ví dụ: Mua đồ ăn vặt" autocomplete="off"></label>'+
+    '<div class="pills">'+QUICK.map((q,i)=>'<button class="pill" data-pa="expq" data-t="'+esc(q)+'" data-fk="eq'+i+'">'+esc(q)+'</button>').join('')+'</div>'+
+    '<label class="fld"><span>Ngày</span><input type="date" id="exp-date" value="'+today+'" max="'+today+'" style="width:auto"></label>'+
+    '<div class="pills"><button class="btn primary" data-pa="expadd" data-fk="ea">Lưu khoản này</button></div><p class="hint" id="exp-msg" role="status"></p></div>'+
+    '<div class="card"><h3>Lịch sử ví</h3>'+(rows||'<p class="muted">Chưa có khoản nào.</p>')+'</div>';
 }
 function penTab(){
   const today=keyOf(new Date()),QUICK=['Không nghe lời','Nói dối','Quên làm việc được giao','Xem tivi hoặc điện thoại quá giờ','Cãi nhau với anh chị em','Nói tục'];
@@ -1197,8 +1268,10 @@ function moreTab(){
     '<div class="pills"><button class="btn" data-pa="gencode" data-fk="gc">Tạo mã</button>'+(pp.code?'<button class="btn" data-pa="copycode" data-fk="cc">Sao chép mã</button>':'')+'</div>'+
     (pp.code?'<textarea id="code-out" readonly aria-label="Mã cài đặt">'+esc(pp.code)+'</textarea>':'')+
     '<label class="fld"><span>Dán mã từ thiết bị khác</span><textarea id="code-in" placeholder="BTL1:..."></textarea></label><div><button class="btn primary" data-pa="importcode" data-fk="ic">Nhập mã</button></div></div>'+
+    (sync.standalone?'<div class="card"><h3>Sao lưu dữ liệu</h3><p class="hint">Tải về một file chứa toàn bộ sao, lịch sử, trừ sao, ví của các bé. Khi cần, chọn lại file để gộp vào, dữ liệu hiện có không bị mất.</p>'+
+    '<div class="pills"><button class="btn" data-pa="bkdl" data-fk="bkd">Tải file sao lưu</button><label class="btn" style="cursor:pointer">Khôi phục từ file<input type="file" accept=".json,application/json" data-pi="bkfile" style="position:absolute;opacity:0;width:1px;height:1px"></label></div><p class="hint" id="bk-msg" role="status"></p></div>':'')+
     '<div class="card"><h3>Làm lại</h3><div class="pills">'+state.kids.map(k=>'<button class="btn sm" data-pa="resettoday" data-id="'+k.id+'" data-fk="rt:'+k.id+'">Bỏ tick hôm nay của '+esc(k.name)+'</button>').join('')+
-    '<button class="btn sm'+(cf?' danger':'')+'" data-pa="resetall" data-fk="ra">'+(cf?'Bấm lại để xóa hết':'Về cài đặt ban đầu')+'</button></div></div>';
+    '<button class="btn sm'+(cf?' danger':'')+'" data-pa="resetall" data-fk="ra">'+(cf?'Bấm lại để về ban đầu':'Về cài đặt ban đầu')+'</button></div></div>';
 }
 
 function moneyTab(){
@@ -1249,6 +1322,37 @@ function pa(a,d){
       state.pen[date]=(state.pen[date]||[]).concat([rec]);markSeen([rec.id]);
       save();queueDay(date);
       note('Đã trừ '+n+' sao của '+((state.kids.find(k=>k.id===kid)||{}).name||'bé')+'. Lý do: '+why);
+      return;
+    }
+    case 'expq':{const el=$('#exp-why',sheet);if(el){el.value=d.t;el.focus();}return;}
+    case 'expadd':{
+      const say2=t=>{const m=$('#exp-msg',sheet);if(m)m.textContent=t;};
+      const kid=(($('#exp-kid',sheet)||{}).value)||state.active,type=(($('#exp-type',sheet)||{}).value)||'spend';
+      const amt=Math.round(+(($('#exp-amt',sheet)||{}).value)||0),why=((($('#exp-why',sheet)||{}).value)||'').trim();
+      const today=keyOf(new Date()),date=((($('#exp-date',sheet)||{}).value)||today);
+      if(!(amt>0)){say2('Hãy nhập số tiền lớn hơn 0.');return;}
+      if(!why){say2('Hãy nhập lý do.');return;}
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||date>today){say2('Ngày không hợp lệ.');return;}
+      const nw=new Date(),rec={id:'e'+uid(),kid,n:type==='add'?amt:-amt,why,at:pad(nw.getHours())+':'+pad(nw.getMinutes())};
+      state.exp[date]=(state.exp[date]||[]).concat([rec]);
+      save();queueDay(date);
+      note((type==='add'?'Đã thêm ':'Đã ghi chi ')+fmt(amt)+' cho '+((state.kids.find(k=>k.id===kid)||{}).name||'bé')+'. Lý do: '+why);
+      return;
+    }
+    case 'expdel':
+      if(pp.confirm==='exp:'+d.id){
+        const dk=d.dk;state.exp[dk]=(state.exp[dk]||[]).filter(p=>p.id!==d.id);
+        if(!state.exp[dk].length)delete state.exp[dk];
+        pp.confirm=null;save();queueDay(dk);note('Đã xóa khoản này.');
+      }else askConfirm('exp:'+d.id);
+      return;
+    case 'bkdl':{
+      try{
+        const blob=new Blob([JSON.stringify(state)],{type:'application/json'}),a=document.createElement('a');
+        a.href=URL.createObjectURL(blob);a.download='be-tu-lam-sao-luu-'+keyOf(new Date())+'.json';
+        document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);
+        const m=$('#bk-msg',sheet);if(m)m.textContent='Đã tạo file sao lưu.';
+      }catch(e){const m=$('#bk-msg',sheet);if(m)m.textContent='Máy này không cho tải file.';}
       return;
     }
     case 'pendel':
@@ -1337,7 +1441,7 @@ function pa(a,d){
       state.pin=v;save();note('Đã đổi mã PIN.');return;
     }
     case 'gencode':{
-      const o={v:1,pin:state.pin,kids:state.kids,tasks:state.tasks,reminders:state.reminders,reward:state.reward,money:state.money,showMoney:state.showMoney,sound:state.sound,speak:state.speak,taskRemind:state.taskRemind};
+      const o={v:1,pin:state.pin,kids:state.kids,tasks:state.tasks,reminders:state.reminders,reward:state.reward,money:state.money,showMoney:state.showMoney,showAllow:state.showAllow,sound:state.sound,speak:state.speak,taskRemind:state.taskRemind};
       pp.code='BTL1:'+b64(JSON.stringify(o));pp.msg='Đã tạo mã. Hãy sao chép rồi dán sang thiết bị khác.';renderSheet();return;
     }
     case 'copycode':{
@@ -1352,7 +1456,7 @@ function pa(a,d){
         if(raw.indexOf('BTL1:')!==0)throw new Error('format');
         const o=JSON.parse(unb64(raw.slice(5)));
         if(!o||!Array.isArray(o.kids)||!o.kids.length||!Array.isArray(o.tasks))throw new Error('data');
-        const n=normalize(Object.assign({},state,o,{done:state.done,plan:state.plan,snap:state.snap,paid:state.paid}));
+        const n=normalize(Object.assign({},state,o,{done:state.done,plan:state.plan,snap:state.snap,paid:state.paid,pen:state.pen,exp:state.exp}));
         Object.keys(state).forEach(k=>delete state[k]);Object.assign(state,n);
         save();note('Đã nhập cài đặt thành công.');
       }catch(e){note('Mã không hợp lệ. Hãy sao chép lại toàn bộ mã, bắt đầu từ BTL1:');}
@@ -1361,8 +1465,9 @@ function pa(a,d){
     case 'resettoday':{const dk=keyOf(new Date());if(state.done[dk])delete state.done[dk][d.id];save();queueDay(dk);note('Đã bỏ các dấu tick của hôm nay.');return;}
     case 'resetall':
       if(pp.confirm==='reset'){
-        const n=defaults();Object.keys(state).forEach(k=>delete state[k]);Object.assign(state,n);
-        save();pp.confirm=null;note('Đã về cài đặt ban đầu.');
+        const keep={done:state.done,plan:state.plan,snap:state.snap,paid:state.paid,pen:state.pen,exp:state.exp};
+        const n=Object.assign(defaults(),keep);Object.keys(state).forEach(k=>delete state[k]);Object.assign(state,n);
+        save();pp.confirm=null;note('Đã về cài đặt ban đầu. Lịch sử sao, trừ sao và ví của các bé vẫn được giữ.');
       }else askConfirm('reset');
       return;
   }
@@ -1396,6 +1501,42 @@ function pi(t,commit){
     case 'mcap':{const n=parseInt(t.value,10);state.money.cap=n>=0?n:0;save();return;}
     case 'mbonus':{const n=parseInt(t.value,10);state.money.bonus=n>=0?n:0;save();return;}
     case 'showmoney':state.showMoney=t.checked;save();return;
+    case 'showallow':state.showAllow=t.checked;save();return;
+    case 'kal':{
+      const kd=state.kids.find(x=>x.id===id);if(!kd)return;
+      const n=Math.max(0,parseInt(t.value,10)||0),wk=keyOf(weekStart(new Date()));
+      kd.ah=kd.ah||[];
+      const last=kd.ah[kd.ah.length-1];
+      if(last&&last.w===wk)last.a=n;
+      else if(n>0||allowAt(kd,wk)>0)kd.ah.push({w:wk,a:n});
+      save();if(commit)renderSheet();return;
+    }
+    case 'bkfile':{
+      const f=t.files&&t.files[0];if(!f)return;
+      const say2=x=>{const m=$('#bk-msg',sheet);if(m)m.textContent=x;};
+      const r=new FileReader();
+      r.onload=()=>{
+        try{
+          const o=JSON.parse(r.result);
+          if(!o||typeof o!=='object'||!o.done)throw new Error('data');
+          let add=0;
+          Object.keys(o.done||{}).forEach(dk=>{
+            state.done[dk]=state.done[dk]||{};
+            Object.keys(o.done[dk]).forEach(kid=>{const a=state.done[dk][kid]=state.done[dk][kid]||[];(o.done[dk][kid]||[]).forEach(i=>{if(a.indexOf(i)<0){a.push(i);add++;}});});
+          });
+          Object.keys(o.plan||{}).forEach(dk=>{if(!state.plan[dk])state.plan[dk]=o.plan[dk];});
+          Object.keys(o.snap||{}).forEach(i=>{if(!state.snap[i])state.snap[i]=o.snap[i];});
+          Object.keys(o.paid||{}).forEach(k=>{if(!state.paid[k])state.paid[k]=o.paid[k];});
+          ['pen','exp'].forEach(f2=>Object.keys(o[f2]||{}).forEach(dk=>{
+            const a=state[f2][dk]=state[f2][dk]||[];
+            (o[f2][dk]||[]).forEach(p=>{if(!a.some(q=>q.id===p.id)){a.push(p);add++;}});
+          }));
+          save();Object.keys(Object.assign({},state.done,state.pen,state.exp)).forEach(dk=>queueDay(dk));
+          note('Đã gộp dữ liệu từ file sao lưu ('+add+' mục mới). Dữ liệu cũ vẫn giữ nguyên.');
+        }catch(e){say2('File không đúng định dạng sao lưu.');}
+      };
+      r.readAsText(f);return;
+    }
     case 'paid':if(t.checked)state.paid[t.dataset.key]=true;else delete state.paid[t.dataset.key];save();return;
   }
 }
@@ -1430,4 +1571,5 @@ initSync();
 })();
 </script>
 
+<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
 </body></html>
